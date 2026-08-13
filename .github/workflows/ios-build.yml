@@ -50,28 +50,25 @@ jobs:
           path: |
             build
             dist
-          key: ${{ runner.os }}-kivyios-v1-${{ hashFiles('ios/requirements.txt') }}
+          key: ${{ runner.os }}-kivyios-v1-${{ hashFiles('requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-kivyios-v1-
 
       - name: Build iOS toolchain
-        working-directory: ./ios
         run: |
           echo "Building python3 and kivy recipes..."
           toolchain build python3 kivy
 
       - name: Stage app files
-        working-directory: ./ios
         run: |
           echo "Staging application files..."
           mkdir -p ios_app
-          cp main.py ios_app/
-          cp requirements.txt ios_app/
+          cp ios/main.py ios_app/
+          cp ios/requirements.txt ios_app/
           echo "Staged files:"
           ls -R ios_app
 
       - name: Create Xcode project
-        working-directory: ./ios
         run: |
           echo "Creating Xcode project..."
           toolchain create YTDownloader ios_app
@@ -86,15 +83,14 @@ jobs:
           fi
 
       - name: Install Python dependencies
-        working-directory: ./ios
         run: |
           echo "Installing Python dependencies..."
           cd YTDownloader-ios
-          ../toolchain pip install -r ../requirements.txt
+          ../toolchain pip install -r ../ios/requirements.txt
           cd ..
 
       - name: Build unsigned IPA for sideloading
-        working-directory: ./ios/YTDownloader-ios
+        working-directory: ./YTDownloader-ios
         run: |
           echo "🔨 Building unsigned IPA for sideloading..."
           xcodebuild -project YTDownloader.xcodeproj \
@@ -107,7 +103,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO
 
       - name: Create IPA package
-        working-directory: ./ios/YTDownloader-ios
+        working-directory: ./YTDownloader-ios
         run: |
           echo "📦 Creating IPA package for sideloading..."
           
@@ -139,7 +135,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: YTDownloader-iOS-unsigned-${{ github.run_number }}
-          path: ios/YTDownloader-ios/${{ env.IPA_NAME }}
+          path: YTDownloader-ios/${{ env.IPA_NAME }}
           retention-days: 90
 
       - name: Generate download info
@@ -169,6 +165,6 @@ jobs:
         with:
           name: ios-build-logs
           path: |
-            ios/YTDownloader-ios/build/
+            YTDownloader-ios/build/
             ~/Library/Logs/xcodebuild*
           retention-days: 7
