@@ -1,0 +1,174 @@
+name: Build iOS App (Unsigned for Sideloading)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'App version'
+        required: true
+        default: '2.0.0'
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tools with Homebrew
+        run: |
+          brew install autoconf automake libtool pkg-config
+          brew link libtool
+
+      - name: Install kivy-ios
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install kivy-ios cython
+
+      - name: Cache kivy-ios toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            dist
+          key: ${{ runner.os }}-kivyios-v1-${{ hashFiles('ios/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-kivyios-v1-
+
+      - name: Build iOS toolchain
+        working-directory: ./ios
+        run: |
+          echo "Building python3 and kivy recipes..."
+          toolchain build python3 kivy
+
+      - name: Stage app files
+        working-directory: ./ios
+        run: |
+          echo "Staging application files..."
+          mkdir -p ios_app
+          cp main.py ios_app/
+          cp requirements.txt ios_app/
+          echo "Staged files:"
+          ls -R ios_app
+
+      - name: Create Xcode project
+        working-directory: ./ios
+        run: |
+          echo "Creating Xcode project..."
+          toolchain create YTDownloader ios_app
+          
+          # Find the created project directory
+          if [ -d "YTDownloader-ios" ]; then
+              echo "✅ Xcode project created successfully"
+              ls -la YTDownloader-ios
+          else
+              echo "❌ Failed to create Xcode project"
+              exit 1
+          fi
+
+      - name: Install Python dependencies
+        working-directory: ./ios
+        run: |
+          echo "Installing Python dependencies..."
+          cd YTDownloader-ios
+          ../toolchain pip install -r ../requirements.txt
+          cd ..
+
+      - name: Build unsigned IPA for sideloading
+        working-directory: ./ios/YTDownloader-ios
+        run: |
+          echo "🔨 Building unsigned IPA for sideloading..."
+          xcodebuild -project YTDownloader.xcodeproj \
+            -scheme YTDownloader \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Create IPA package
+        working-directory: ./ios/YTDownloader-ios
+        run: |
+          echo "📦 Creating IPA package for sideloading..."
+          
+          # Find the app bundle
+          APP_PATH=$(find build/Build/Products -name "*.app" | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "❌ Could not find .app bundle"
+            exit 1
+          fi
+          
+          echo "Found app at: $APP_PATH"
+          
+          # Create IPA structure
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          
+          # Create IPA with version naming
+          VERSION="${{ github.event.inputs.version || '2.0.0' }}"
+          BUILD_NUM="${{ github.run_number }}"
+          IPA_NAME="YTDownloader-${VERSION}-${BUILD_NUM}-unsigned.ipa"
+          
+          zip -r "$IPA_NAME" Payload/
+          
+          echo "✅ Unsigned IPA created: $IPA_NAME"
+          echo "IPA_NAME=$IPA_NAME" >> $GITHUB_ENV
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YTDownloader-iOS-unsigned-${{ github.run_number }}
+          path: ios/YTDownloader-ios/${{ env.IPA_NAME }}
+          retention-days: 90
+
+      - name: Generate download info
+        run: |
+          echo "## 🍎 iOS Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ github.event.inputs.version || '2.0.0' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Type**: Unsigned (for sideloading)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📱 Distribution" >> $GITHUB_STEP_SUMMARY
+          echo "This IPA is **unsigned** and designed for sideloading." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Users can install this IPA using:" >> $GITHUB_STEP_SUMMARY
+          echo "- **AltStore** (recommended)" >> $GITHUB_STEP_SUMMARY
+          echo "- **SideStore** (open-source alternative)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Sideloadly** (for Windows/Linux)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 Download" >> $GITHUB_STEP_SUMMARY
+          echo "Download the IPA from the artifacts section below." >> $GITHUB_STEP_SUMMARY
+          echo "Upload it to your website for users to download." >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-build-logs
+          path: |
+            ios/YTDownloader-ios/build/
+            ~/Library/Logs/xcodebuild*
+          retention-days: 7

@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>YT Downloader</string>
+    <key>CFBundleExecutable</key>
+    <string>YTDownloader</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.mpagiwilliam.ytdownloader</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>YTDownloader</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>armv7</string>
+    </array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>This app needs access to save downloaded videos and photos to your photo library.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>This app needs permission to save downloaded media to your photo library.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>This app needs access to your documents folder to save downloaded files.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>This app needs network access to download videos from YouTube.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>This app needs local network access for downloading content.</string>
+</dict>
+</plist>
