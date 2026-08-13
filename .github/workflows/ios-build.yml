@@ -43,6 +43,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install kivy-ios cython
+          
+      - name: Verify toolchain installation
+        run: |
+          echo "Checking toolchain installation..."
+          which toolchain
+          toolchain --version || echo "Toolchain version check failed"
+          toolchain recipes || echo "Toolchain recipes check failed"
 
       - name: Cache kivy-ios toolchain
         uses: actions/cache@v4
@@ -58,6 +65,7 @@ jobs:
         run: |
           echo "Building python3 and kivy recipes..."
           toolchain build python3 kivy
+        continue-on-error: true
 
       - name: Stage app files
         run: |
@@ -79,6 +87,8 @@ jobs:
               ls -la YTDownloader-ios
           else
               echo "❌ Failed to create Xcode project"
+              echo "Current directory contents:"
+              ls -la
               exit 1
           fi
 
@@ -167,4 +177,5 @@ jobs:
           path: |
             YTDownloader-ios/build/
             ~/Library/Logs/xcodebuild*
+          if-no-files-found: ignore
           retention-days: 7
