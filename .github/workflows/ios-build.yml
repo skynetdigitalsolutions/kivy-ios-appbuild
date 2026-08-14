@@ -78,6 +78,16 @@ jobs:
           which toolchain
           toolchain recipes
 
+      # ── 6.5. Verify toolchain Python is functional (fixes cached toolchain issues)
+      - name: Verify toolchain Python functionality
+        run: |
+          echo "Testing toolchain Python environment..."
+          if ! toolchain pip --version; then
+            echo "Toolchain pip not functional, rebuilding toolchain..."
+            rm -rf dist/ build/
+            toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
+          fi
+
       # ── 7. Stage app files ─────────────────────────────────────────────────
       - name: Stage application files
         run: |
@@ -139,6 +149,8 @@ jobs:
       - name: Install pure-Python dependencies
         run: |
           cd YTDownloader-ios
+          # Ensure toolchain Python is properly initialized
+          toolchain pip install --upgrade pip
           toolchain pip install -r ../ios/requirements.txt
 
       # ── 12. Build unsigned IPA ────────────────────────────────────────────
