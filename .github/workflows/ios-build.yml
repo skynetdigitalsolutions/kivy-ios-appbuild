@@ -1,10 +1,10 @@
-name: Build iOS App (Unsigned for Sideloading)
+name: Build iOS App (Unsigned – Sideloading)
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'App version'
+        description: 'App version (e.g. 2.0.1)'
         required: true
         default: '2.0.0'
   push:
@@ -26,188 +26,199 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      - name: Check out code
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      # ── 2. Python ─────────────────────────────────────────────────────────
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install build tools with Homebrew
+      # ── 3. Homebrew build tools ────────────────────────────────────────────
+      - name: Install Homebrew build dependencies
         run: |
           brew install autoconf automake libtool pkg-config
           brew link libtool
+          gem install xcpretty --no-document 2>/dev/null || true
 
-      - name: Install kivy-ios
+      # ── 4. kivy-ios + Cython ──────────────────────────────────────────────
+      - name: Install kivy-ios and Cython
         run: |
           python -m pip install --upgrade pip
-          python -m pip install kivy-ios cython
-          
-      - name: Verify toolchain installation
-        run: |
-          echo "Checking toolchain installation..."
-          which toolchain
-          toolchain --version || echo "Toolchain version check failed"
-          toolchain recipes || echo "Toolchain recipes check failed"
+          python -m pip install "kivy-ios>=1.4.0" "cython>=0.29"
 
-      - name: Cache kivy-ios toolchain
+      # ── 5. Cache compiled toolchain ───────────────────────────────────────
+      #  *** MUST come before the toolchain build step so the cache is
+      #  restored before we try to compile python3/kivy. ***
+      - name: Cache kivy-ios compiled toolchain
+        id: cache-toolchain
         uses: actions/cache@v4
         with:
           path: |
-            build
-            dist
-          key: ${{ runner.os }}-kivyios-v1-${{ hashFiles('ios/requirements.txt') }}
+            ~/.cache/kivy-ios
+            dist/
+            build/
+          key: ${{ runner.os }}-kivyios-${{ hashFiles('ios/requirements.txt') }}-v3
           restore-keys: |
-            ${{ runner.os }}-kivyios-v1-
+            ${{ runner.os }}-kivyios-
 
-      - name: Build iOS toolchain
+      # ── 6. Build toolchain (skipped if cache hit) ──────────────────────────
+      - name: Build kivy-ios toolchain (python3 + kivy + ffmpeg)
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
-          echo "Building python3 and kivy recipes..."
-          toolchain build python3 kivy
-        continue-on-error: true
+          echo "Cache miss – building toolchain from source (takes ~20 min)…"
+          toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
 
-      - name: Stage app files
+      - name: Verify toolchain
         run: |
-          echo "Staging application files..."
+          echo "Toolchain dist contents:"
+          ls dist/ || echo "(dist/ not present)"
+          which toolchain
+          toolchain recipes
+
+      # ── 7. Stage app files ─────────────────────────────────────────────────
+      - name: Stage application files
+        run: |
           mkdir -p ios_app
-          cp ios/main.py ios_app/
+          cp ios/main.py        ios_app/
           cp ios/requirements.txt ios_app/
-          cp ios/Info.plist ios_app/
-          if [ -d "ios/appicon" ]; then
-            cp -r ios/appicon/AppIcon.appiconset ios_app/
-            echo "[App icons staged successfully]"
-          else
-            echo "[Warning: App icon directory not found, will use default icon]"
-          fi
-          echo "Staged files:"
-          ls -R ios_app
+          cp ios/Info.plist     ios_app/
 
-      - name: Create Xcode project
+          if [ -d "ios/appicon/AppIcon.appiconset" ]; then
+            cp -r ios/appicon/AppIcon.appiconset ios_app/
+            echo "App icons staged."
+          else
+            echo "Warning: AppIcon.appiconset not found, default icon will be used."
+          fi
+
+          echo "Staged files:"
+          ls -R ios_app/
+
+      # ── 8. Create Xcode project ────────────────────────────────────────────
+      - name: Create Xcode project via toolchain
         run: |
-          echo "Creating Xcode project..."
           toolchain create YTDownloader ios_app
 
-          # Find the created project directory
-          if [ -d "YTDownloader-ios" ]; then
-              echo "[Xcode project created successfully]"
-              ls -la YTDownloader-ios
-          else
-              echo "[Failed to create Xcode project]"
-              echo "Current directory contents:"
-              ls -la
-              exit 1
+          if [ ! -d "YTDownloader-ios" ]; then
+            echo "Error: Xcode project was not created."
+            ls -la
+            exit 1
           fi
+          echo "Xcode project created:"
+          ls -la YTDownloader-ios/
 
-      - name: Update Info.plist in Xcode project
+      # ── 9. Apply Info.plist ────────────────────────────────────────────────
+      - name: Apply custom Info.plist
         run: |
-          echo "Updating Info.plist with iOS-specific configurations..."
+          TARGET="YTDownloader-ios/YTDownloader/Info.plist"
           if [ -f "ios_app/Info.plist" ]; then
-              cp ios_app/Info.plist YTDownloader-ios/YTDownloader/Info.plist
-              echo "[Info.plist updated successfully]"
+            cp ios_app/Info.plist "$TARGET"
+            echo "Info.plist applied."
           else
-              echo "[Warning: Info.plist not found in ios_app]"
+            echo "Warning: Info.plist not found."
           fi
 
+      # ── 10. Apply app icon ────────────────────────────────────────────────
       - name: Configure app icon
         run: |
-          echo "Configuring app icon..."
           cd YTDownloader-ios
-
-          # Copy the AppIcon.appiconset to the project
+          mkdir -p YTDownloader/Assets.xcassets
           if [ -d "../ios_app/AppIcon.appiconset" ]; then
-              mkdir -p YTDownloader/Assets.xcassets
-              cp -r ../ios_app/AppIcon.appiconset YTDownloader/Assets.xcassets/
-              echo "[App icon configured successfully]"
+            cp -r ../ios_app/AppIcon.appiconset YTDownloader/Assets.xcassets/
+            echo "App icon configured."
           else
-              echo "[AppIcon.appiconset not found, using default icon]"
-              # Create a basic icon structure if missing
-              mkdir -p YTDownloader/Assets.xcassets/AppIcon.appiconset
-              echo "[Created default icon structure]"
+            mkdir -p YTDownloader/Assets.xcassets/AppIcon.appiconset
+            echo "Default empty icon structure created."
           fi
 
-      - name: Install Python dependencies
+      # ── 11. Install pure-Python dependencies ──────────────────────────────
+      # requirements.txt contains only pure-Python packages (yt-dlp, plyer, …).
+      # kivy and pyobjus are NOT listed there; they are compiled by the toolchain.
+      - name: Install pure-Python dependencies
         run: |
-          echo "Installing Python dependencies..."
           cd YTDownloader-ios
           toolchain pip install -r ../ios/requirements.txt
-          cd ..
 
-      - name: Build unsigned IPA for sideloading
+      # ── 12. Build unsigned IPA ────────────────────────────────────────────
+      - name: Build unsigned IPA
         working-directory: ./YTDownloader-ios
         run: |
-          echo "[Building unsigned IPA for sideloading...]"
-          xcodebuild -project YTDownloader.xcodeproj \
-            -scheme YTDownloader \
+          xcodebuild \
+            -project YTDownloader.xcodeproj \
+            -scheme  YTDownloader \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty || true   # xcpretty for clean output; fall back to raw
 
-      - name: Create IPA package
+      # ── 13. Package IPA ───────────────────────────────────────────────────
+      - name: Package IPA for sideloading
         working-directory: ./YTDownloader-ios
         run: |
-          echo "[Creating IPA package for sideloading...]"
-
-          # Find the app bundle
           APP_PATH=$(find build/Build/Products -name "*.app" | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "[Could not find .app bundle]"
+            echo "Error: .app bundle not found."
+            find build/ -name "*.app" || true
             exit 1
           fi
 
-          echo "Found app at: $APP_PATH"
-          
-          # Create IPA structure
+          echo "Found .app bundle: $APP_PATH"
+
+          VERSION="${{ github.event.inputs.version || '2.0.0' }}"
+          BUILD="${{ github.run_number }}"
+          IPA_NAME="YTDownloader-${VERSION}-${BUILD}-unsigned.ipa"
+
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
-          
-          # Create IPA with version naming
-          VERSION="${{ github.event.inputs.version || '2.0.0' }}"
-          BUILD_NUM="${{ github.run_number }}"
-          IPA_NAME="YTDownloader-${VERSION}-${BUILD_NUM}-unsigned.ipa"
-          
           zip -r "$IPA_NAME" Payload/
+          rm -rf Payload/
 
-          echo "[Unsigned IPA created: $IPA_NAME]"
-          echo "IPA_NAME=$IPA_NAME" >> $GITHUB_ENV
+          echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
+          echo "Created: $IPA_NAME ($(du -sh "$IPA_NAME" | cut -f1))"
 
-      - name: Upload IPA artifact
+      # ── 14. Upload IPA artifact ───────────────────────────────────────────
+      - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
           name: YTDownloader-iOS-unsigned-${{ github.run_number }}
           path: YTDownloader-ios/${{ env.IPA_NAME }}
           retention-days: 90
 
-      - name: Generate download info
+      # ── 15. Build summary ─────────────────────────────────────────────────
+      - name: Write build summary
+        if: always()
         run: |
-          echo "## iOS Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Version**: ${{ github.event.inputs.version || '2.0.0' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Type**: Unsigned (for sideloading)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Distribution" >> $GITHUB_STEP_SUMMARY
-          echo "This IPA is **unsigned** and designed for sideloading." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Users can install this IPA using:" >> $GITHUB_STEP_SUMMARY
-          echo "- **AltStore** (recommended)" >> $GITHUB_STEP_SUMMARY
-          echo "- **SideStore** (open-source alternative)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Sideloadly** (for Windows/Linux)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Download" >> $GITHUB_STEP_SUMMARY
-          echo "Download the IPA from the artifacts section below." >> $GITHUB_STEP_SUMMARY
-          echo "Upload it to your website for users to download." >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## iOS Build Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Version | ${{ github.event.inputs.version || '2.0.0' }} |"
+            echo "| Build # | ${{ github.run_number }} |"
+            echo "| Type | Unsigned (sideloading) |"
+            echo "| Status | ${{ job.status }} |"
+            echo ""
+            echo "### Install with"
+            echo "- **AltStore** (recommended)"
+            echo "- **SideStore**"
+            echo "- **Sideloadly** (Windows / Linux)"
+            echo ""
+            echo "### Where to find downloaded files on device"
+            echo "Files app → On My iPhone → YT Downloader"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload build logs
+      # ── 16. Upload build logs on failure ──────────────────────────────────
+      - name: Upload build logs (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-build-logs
+          name: ios-build-logs-${{ github.run_number }}
           path: |
             YTDownloader-ios/build/
             ~/Library/Logs/xcodebuild*

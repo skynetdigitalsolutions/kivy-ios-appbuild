@@ -1,4 +1,6 @@
-kivy
+# ── Pure-Python dependencies installed via `toolchain pip install` ─────────────
+# DO NOT add 'kivy' here — it is compiled by the kivy-ios toolchain, not pip.
+# DO NOT add 'pyobjus' — also handled by the toolchain.
 yt-dlp
 charset-normalizer>=3.0.0
-pyobjus  # iOS-specific library for Objective-C bindings
+plyer

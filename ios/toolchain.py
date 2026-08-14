@@ -20,7 +20,7 @@ IOS_DEPLOYMENT_TARGET = "12.0"
 RECIPIES_TO_BUILD = [
     "python3",
     "kivy",
-    # Add other recipes as needed for your dependencies
+    "ffmpeg",
 ]
 
 # Pure Python dependencies (installed via pip)
