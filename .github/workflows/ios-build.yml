@@ -60,7 +60,7 @@ jobs:
             ~/.cache/kivy-ios
             dist/
             build/
-          key: ${{ runner.os }}-kivyios-${{ hashFiles('ios/requirements.txt') }}-v3
+          key: ${{ runner.os }}-kivyios-${{ hashFiles('ios/requirements.txt') }}-v4
           restore-keys: |
             ${{ runner.os }}-kivyios-
 
@@ -78,15 +78,68 @@ jobs:
           which toolchain
           toolchain recipes
 
-      # ── 6.5. Verify toolchain Python is functional (fixes cached toolchain issues)
-      - name: Verify toolchain Python functionality
+      # ── 6.5. Comprehensive toolchain verification and recovery (handles all 3 error cases)
+      - name: Comprehensive toolchain verification and recovery
         run: |
-          echo "Testing toolchain Python environment..."
-          if ! toolchain pip --version; then
-            echo "Toolchain pip not functional, rebuilding toolchain..."
+          echo "=== Comprehensive Toolchain Verification ==="
+          
+          # Case 1: Check if toolchain commands are available
+          echo "Case 1: Verifying toolchain command availability..."
+          if ! command -v toolchain &> /dev/null; then
+            echo "ERROR: toolchain command not found"
+            exit 1
+          fi
+          echo "✓ toolchain command available"
+          
+          # Case 2: Check for cache corruption - verify dist/ directory structure
+          echo "Case 2: Checking for cache corruption..."
+          if [ -d "dist" ]; then
+            echo "Found dist/ directory, checking contents..."
+            ls -la dist/
+            if [ -z "$(ls -A dist/)" ]; then
+              echo "ERROR: dist/ directory is empty (cache corruption)"
+              echo "Cleaning corrupted cache and rebuilding..."
+              rm -rf dist/ build/ ~/.cache/kivy-ios
+              toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
+            else
+              echo "✓ dist/ directory has content"
+            fi
+          else
+            echo "dist/ directory not found, toolchain not built yet"
+          fi
+          
+          # Case 3: Check for environment initialization - test toolchain pip
+          echo "Case 3: Checking toolchain Python environment initialization..."
+          if ! toolchain pip --version 2>&1; then
+            echo "ERROR: toolchain pip not functional (environment initialization issue)"
+            echo "Attempting to fix by rebuilding toolchain..."
             rm -rf dist/ build/
             toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
+            
+            # Verify rebuild worked
+            if ! toolchain pip --version 2>&1; then
+              echo "ERROR: Toolchain rebuild failed to fix pip issue"
+              echo "Detailed toolchain status:"
+              toolchain recipes || true
+              ls -la dist/ || true
+              exit 1
+            fi
+          else
+            echo "✓ toolchain pip is functional"
           fi
+          
+          # Additional verification: Check python3 recipe is compiled
+          echo "Additional check: Verifying python3 recipe compilation..."
+          if ! toolchain recipes | grep -q "python3.*compiled"; then
+            echo "WARNING: python3 might not be properly compiled"
+            echo "Rebuilding toolchain to ensure python3 is compiled..."
+            rm -rf dist/ build/
+            toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
+          else
+            echo "✓ python3 recipe appears compiled"
+          fi
+          
+          echo "=== Toolchain verification complete ==="
 
       # ── 7. Stage app files ─────────────────────────────────────────────────
       - name: Stage application files
@@ -119,6 +172,26 @@ jobs:
           echo "Xcode project created:"
           ls -la YTDownloader-ios/
 
+      # ── 8.5. Re-verify toolchain after project creation (environment initialization check)
+      - name: Re-verify toolchain functionality after project creation
+        run: |
+          echo "Re-checking toolchain pip after project creation..."
+          cd YTDownloader-ios
+          if ! toolchain pip --version 2>&1; then
+            echo "ERROR: toolchain pip broke after project creation"
+            echo "This indicates an environment initialization issue"
+            cd ..
+            rm -rf dist/ build/ YTDownloader-ios
+            toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
+            toolchain create YTDownloader ios_app
+            cd YTDownloader-ios
+            if ! toolchain pip --version 2>&1; then
+              echo "ERROR: Still cannot fix toolchain pip after rebuild"
+              exit 1
+            fi
+          fi
+          echo "✓ toolchain pip still functional after project creation"
+
       # ── 9. Apply Info.plist ────────────────────────────────────────────────
       - name: Apply custom Info.plist
         run: |
@@ -149,9 +222,23 @@ jobs:
       - name: Install pure-Python dependencies
         run: |
           cd YTDownloader-ios
-          # Ensure toolchain Python is properly initialized
+          
+          echo "=== Pre-installation diagnostics ==="
+          echo "Current directory: $(pwd)"
+          echo "Toolchain location: $(which toolchain)"
+          echo "Dist directory contents:"
+          ls -la ../dist/ || echo "No dist/ directory found"
+          echo "Requirements file:"
+          cat ../ios/requirements.txt
+          
+          echo "=== Upgrading pip in toolchain environment ==="
           toolchain pip install --upgrade pip
+          
+          echo "=== Installing requirements ==="
           toolchain pip install -r ../ios/requirements.txt
+          
+          echo "=== Post-installation verification ==="
+          toolchain pip list
 
       # ── 12. Build unsigned IPA ────────────────────────────────────────────
       - name: Build unsigned IPA
