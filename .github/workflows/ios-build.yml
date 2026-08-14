@@ -60,7 +60,7 @@ jobs:
             ~/.cache/kivy-ios
             dist/
             build/
-          key: ${{ runner.os }}-kivyios-${{ hashFiles('ios/requirements.txt') }}-v4
+          key: ${{ runner.os }}-kivyios-${{ hashFiles('ios/requirements.txt') }}-v5
           restore-keys: |
             ${{ runner.os }}-kivyios-
 
@@ -108,8 +108,52 @@ jobs:
             echo "dist/ directory not found, toolchain not built yet"
           fi
           
-          # Case 3: Check for environment initialization - test toolchain pip
-          echo "Case 3: Checking toolchain Python environment initialization..."
+          # Case 3: Check for hostpython3 pip binary specifically
+          echo "Case 3: Checking for hostpython3 pip binary..."
+          if [ -d "dist/hostpython3" ]; then
+            echo "Found hostpython3 directory, checking for pip binary..."
+            ls -la dist/hostpython3/bin/ || echo "No bin directory in hostpython3"
+            
+            if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
+              echo "ERROR: hostpython3 pip binary missing (this is the reported issue)"
+              echo "Attempting to install pip manually in hostpython3..."
+              
+              # Try to manually install pip using the hostpython3
+              if [ -f "dist/hostpython3/bin/python3" ]; then
+                echo "Found hostpython3 python binary, attempting to bootstrap pip..."
+                dist/hostpython3/bin/python3 -m ensurepip --upgrade || dist/hostpython3/bin/python3 -m pip install --upgrade pip
+                
+                # Check if pip was installed
+                if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
+                  echo "Manual pip installation failed, rebuilding toolchain..."
+                  rm -rf dist/ build/ ~/.cache/kivy-ios
+                  toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
+                else
+                  echo "✓ hostpython3 pip binary installed manually"
+                fi
+              else
+                echo "hostpython3 python binary not found, rebuilding toolchain..."
+                rm -rf dist/ build/ ~/.cache/kivy-ios
+                toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
+              fi
+              
+              # Verify pip binary exists after recovery attempt
+              if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
+                echo "ERROR: hostpython3 pip binary still missing after recovery attempts"
+                ls -la dist/hostpython3/bin/ || true
+                exit 1
+              else
+                echo "✓ hostpython3 pip binary now present"
+              fi
+            else
+              echo "✓ hostpython3 pip binary exists"
+            fi
+          else
+            echo "hostpython3 directory not found, toolchain not built yet"
+          fi
+          
+          # Case 4: Check for environment initialization - test toolchain pip
+          echo "Case 4: Checking toolchain Python environment initialization..."
           if ! toolchain pip --version 2>&1; then
             echo "ERROR: toolchain pip not functional (environment initialization issue)"
             echo "Attempting to fix by rebuilding toolchain..."

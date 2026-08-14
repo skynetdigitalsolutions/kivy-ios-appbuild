@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import webbrowser
 import zipfile
 
 # ── yt-dlp ────────────────────────────────────────────────────────────────────
@@ -44,11 +45,10 @@ from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.utils import get_color_from_hex
 
 # ── App metadata ──────────────────────────────────────────────────────────────
-APP_NAME    = "YT Downloader"
-APP_VERSION = "v2.0.0"
-DEV_NAME    = "Mpagi William & Tony Bbosa"
-DEV_ROLE    = "Full-Stack Developers"
-DEV_CONTACT = "skynetdigitalsolutionsug@gmail.com"
+APP_NAME      = "YT Downloader"
+APP_VERSION   = "v2.0.0"
+DEV_NAME      = "Mpagi William & Tony Bbosa"
+WHATSAPP_LINK = "https://chat.whatsapp.com/L1KGOt3d2A61Qh7UYwFBuF"
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 BG       = get_color_from_hex("#0d1117")
@@ -644,18 +644,18 @@ class DownloaderScreen(BoxLayout):
         )
         body.add_widget(self._progress)
 
-        body.add_widget(self._gap(dp(8)))
+        body.add_widget(self._gap(dp(12)))
 
         # ── Info / status labels ──────────────────────────────────────────────
         self._info_lbl = self._lbl(
-            "", font_size=dp(12), color=ACCENT, bold=True, height=dp(20)
+            "", font_size=dp(13), color=ACCENT, bold=True, height=dp(24)
         )
         body.add_widget(self._info_lbl)
 
-        body.add_widget(self._gap(dp(4)))
+        body.add_widget(self._gap(dp(8)))
 
         self._status_lbl = self._lbl(
-            "Ready", font_size=dp(12), color=SUBTEXT, height=dp(20)
+            "Ready", font_size=dp(13), color=SUBTEXT, height=dp(24)
         )
         body.add_widget(self._status_lbl)
         sv.add_widget(body)
@@ -664,7 +664,7 @@ class DownloaderScreen(BoxLayout):
     # ── Footer ────────────────────────────────────────────────────────────────
 
     def _build_footer(self):
-        foot = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(52))
+        foot = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(58))
 
         accent_line = Widget(size_hint_y=None, height=dp(2))
         with accent_line.canvas.before:
@@ -679,7 +679,7 @@ class DownloaderScreen(BoxLayout):
         foot.add_widget(accent_line)
 
         content = BoxLayout(
-            orientation="horizontal", padding=[dp(16), dp(6)],
+            orientation="horizontal", padding=[dp(16), dp(4)],
         )
         with foot.canvas.before:
             Color(*SURF2)
@@ -691,11 +691,10 @@ class DownloaderScreen(BoxLayout):
 
         foot_lbl = Label(
             text=(
-                f"[b][color=e6edf3]{DEV_NAME}[/color][/b]"
-                f"[color=484f58]  ·  [/color]"
-                f"[color=8b949e]{DEV_ROLE}[/color]"
-                f"[color=484f58]  ·  [/color]"
-                f"[color=8b949e]{APP_VERSION}[/color]"
+                f"[color=8b949e]{DEV_NAME}[/color]"
+                f"[color=484f58]   ·   [/color]"
+                f"[color=484f58]{APP_VERSION}[/color]\n"
+                f"[ref=whatsapp][u][color=3fb950]Contact Us (WhatsApp)[/color][/u][/ref]"
             ),
             markup=True,
             font_size=dp(10),
@@ -703,9 +702,14 @@ class DownloaderScreen(BoxLayout):
             valign="middle",
         )
         foot_lbl.bind(size=foot_lbl.setter("text_size"))
+        foot_lbl.bind(on_ref_press=self._on_footer_ref_press)
         content.add_widget(foot_lbl)
         foot.add_widget(content)
         self.add_widget(foot)
+
+    def _on_footer_ref_press(self, _instance, value):
+        if value == "whatsapp":
+            webbrowser.open(WHATSAPP_LINK)
 
     # ── Interaction ───────────────────────────────────────────────────────────
 
