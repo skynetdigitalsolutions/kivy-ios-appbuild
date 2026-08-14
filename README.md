@@ -97,6 +97,8 @@ The workflow is configured to:
 - [iOS Build Guide](ios/README.md) - Detailed iOS build instructions
 - [Sideloading Guide](ios/SIDELOADING_GUIDE.md) - User installation instructions
 - [Code Signing Setup](ios/codesign-setup.md) - For signed builds (optional)
+- [Phone-Only Distribution](PHONE_ONLY_DISTRIBUTION.md) - Install without computer (Scarlet/Esign)
+- [SideStore Distribution](SIDESTORE_DISTRIBUTION.md) - SideStore setup and sources
 
 ## Developers
 
