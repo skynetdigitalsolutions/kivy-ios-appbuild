@@ -20,6 +20,8 @@
     <string>2.0.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UIRequiredDeviceCapabilities</key>
@@ -43,6 +45,23 @@
     <dict>
         <key>NSAllowsArbitraryLoads</key>
         <true/>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>youtube.com</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+            </dict>
+            <key>youtu.be</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+                <key>NSIncludesSubdomains</key>
+                <true/>
+            </dict>
+        </dict>
     </dict>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>This app needs access to save downloaded videos and photos to your photo library.</string>
@@ -54,5 +73,11 @@
     <string>This app needs network access to download videos from YouTube.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>This app needs local network access for downloading content.</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+    <key>UIFileSharingEnabled</key>
+    <true/>
+    <key>UIsupportsDocumentBrowser</key>
+    <true/>
 </dict>
 </plist>

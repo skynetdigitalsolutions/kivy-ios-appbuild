@@ -73,6 +73,13 @@ jobs:
           mkdir -p ios_app
           cp ios/main.py ios_app/
           cp ios/requirements.txt ios_app/
+          cp ios/Info.plist ios_app/
+          if [ -d "ios/appicon" ]; then
+            cp -r ios/appicon/AppIcon.appiconset ios_app/
+            echo "[App icons staged successfully]"
+          else
+            echo "[Warning: App icon directory not found, will use default icon]"
+          fi
           echo "Staged files:"
           ls -R ios_app
 
@@ -80,29 +87,56 @@ jobs:
         run: |
           echo "Creating Xcode project..."
           toolchain create YTDownloader ios_app
-          
+
           # Find the created project directory
           if [ -d "YTDownloader-ios" ]; then
-              echo "✅ Xcode project created successfully"
+              echo "[Xcode project created successfully]"
               ls -la YTDownloader-ios
           else
-              echo "❌ Failed to create Xcode project"
+              echo "[Failed to create Xcode project]"
               echo "Current directory contents:"
               ls -la
               exit 1
+          fi
+
+      - name: Update Info.plist in Xcode project
+        run: |
+          echo "Updating Info.plist with iOS-specific configurations..."
+          if [ -f "ios_app/Info.plist" ]; then
+              cp ios_app/Info.plist YTDownloader-ios/YTDownloader/Info.plist
+              echo "[Info.plist updated successfully]"
+          else
+              echo "[Warning: Info.plist not found in ios_app]"
+          fi
+
+      - name: Configure app icon
+        run: |
+          echo "Configuring app icon..."
+          cd YTDownloader-ios
+
+          # Copy the AppIcon.appiconset to the project
+          if [ -d "../ios_app/AppIcon.appiconset" ]; then
+              mkdir -p YTDownloader/Assets.xcassets
+              cp -r ../ios_app/AppIcon.appiconset YTDownloader/Assets.xcassets/
+              echo "[App icon configured successfully]"
+          else
+              echo "[AppIcon.appiconset not found, using default icon]"
+              # Create a basic icon structure if missing
+              mkdir -p YTDownloader/Assets.xcassets/AppIcon.appiconset
+              echo "[Created default icon structure]"
           fi
 
       - name: Install Python dependencies
         run: |
           echo "Installing Python dependencies..."
           cd YTDownloader-ios
-          ../toolchain pip install -r ../ios/requirements.txt
+          toolchain pip install -r ../ios/requirements.txt
           cd ..
 
       - name: Build unsigned IPA for sideloading
         working-directory: ./YTDownloader-ios
         run: |
-          echo "🔨 Building unsigned IPA for sideloading..."
+          echo "[Building unsigned IPA for sideloading...]"
           xcodebuild -project YTDownloader.xcodeproj \
             -scheme YTDownloader \
             -configuration Release \
@@ -115,16 +149,16 @@ jobs:
       - name: Create IPA package
         working-directory: ./YTDownloader-ios
         run: |
-          echo "📦 Creating IPA package for sideloading..."
-          
+          echo "[Creating IPA package for sideloading...]"
+
           # Find the app bundle
           APP_PATH=$(find build/Build/Products -name "*.app" | head -1)
-          
+
           if [ -z "$APP_PATH" ]; then
-            echo "❌ Could not find .app bundle"
+            echo "[Could not find .app bundle]"
             exit 1
           fi
-          
+
           echo "Found app at: $APP_PATH"
           
           # Create IPA structure
@@ -137,8 +171,8 @@ jobs:
           IPA_NAME="YTDownloader-${VERSION}-${BUILD_NUM}-unsigned.ipa"
           
           zip -r "$IPA_NAME" Payload/
-          
-          echo "✅ Unsigned IPA created: $IPA_NAME"
+
+          echo "[Unsigned IPA created: $IPA_NAME]"
           echo "IPA_NAME=$IPA_NAME" >> $GITHUB_ENV
 
       - name: Upload IPA artifact
@@ -150,14 +184,14 @@ jobs:
 
       - name: Generate download info
         run: |
-          echo "## 🍎 iOS Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## iOS Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: ${{ github.event.inputs.version || '2.0.0' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Build Type**: Unsigned (for sideloading)" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📱 Distribution" >> $GITHUB_STEP_SUMMARY
+          echo "### Distribution" >> $GITHUB_STEP_SUMMARY
           echo "This IPA is **unsigned** and designed for sideloading." >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Users can install this IPA using:" >> $GITHUB_STEP_SUMMARY
@@ -165,7 +199,7 @@ jobs:
           echo "- **SideStore** (open-source alternative)" >> $GITHUB_STEP_SUMMARY
           echo "- **Sideloadly** (for Windows/Linux)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📥 Download" >> $GITHUB_STEP_SUMMARY
+          echo "### Download" >> $GITHUB_STEP_SUMMARY
           echo "Download the IPA from the artifacts section below." >> $GITHUB_STEP_SUMMARY
           echo "Upload it to your website for users to download." >> $GITHUB_STEP_SUMMARY
 

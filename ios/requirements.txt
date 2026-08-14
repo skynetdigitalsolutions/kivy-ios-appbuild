@@ -1,4 +1,4 @@
 kivy
 yt-dlp
-charset_normalizer>=3.0.0
+charset-normalizer>=3.0.0
 pyobjus  # iOS-specific library for Objective-C bindings
