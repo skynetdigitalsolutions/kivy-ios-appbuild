@@ -141,7 +141,29 @@ jobs:
           
           echo "=== Toolchain verification complete ==="
 
-      # ── 7. Stage app files ─────────────────────────────────────────────────
+      # ── 7. Install pure-Python dependencies BEFORE project creation (avoids environment initialization issues)
+      # requirements.txt contains only pure-Python packages (yt-dlp, plyer, …).
+      # kivy and pyobjus are NOT listed there; they are compiled by the toolchain.
+      - name: Install pure-Python dependencies
+        run: |
+          echo "=== Pre-installation diagnostics ==="
+          echo "Current directory: $(pwd)"
+          echo "Toolchain location: $(which toolchain)"
+          echo "Dist directory contents:"
+          ls -la dist/ || echo "No dist/ directory found"
+          echo "Requirements file:"
+          cat ios/requirements.txt
+          
+          echo "=== Upgrading pip in toolchain environment ==="
+          toolchain pip install --upgrade pip
+          
+          echo "=== Installing requirements ==="
+          toolchain pip install -r ios/requirements.txt
+          
+          echo "=== Post-installation verification ==="
+          toolchain pip list
+
+      # ── 8. Stage app files ─────────────────────────────────────────────────
       - name: Stage application files
         run: |
           mkdir -p ios_app
@@ -159,7 +181,7 @@ jobs:
           echo "Staged files:"
           ls -R ios_app/
 
-      # ── 8. Create Xcode project ────────────────────────────────────────────
+      # ── 9. Create Xcode project ────────────────────────────────────────────
       - name: Create Xcode project via toolchain
         run: |
           toolchain create YTDownloader ios_app
@@ -172,27 +194,7 @@ jobs:
           echo "Xcode project created:"
           ls -la YTDownloader-ios/
 
-      # ── 8.5. Re-verify toolchain after project creation (environment initialization check)
-      - name: Re-verify toolchain functionality after project creation
-        run: |
-          echo "Re-checking toolchain pip after project creation..."
-          cd YTDownloader-ios
-          if ! toolchain pip --version 2>&1; then
-            echo "ERROR: toolchain pip broke after project creation"
-            echo "This indicates an environment initialization issue"
-            cd ..
-            rm -rf dist/ build/ YTDownloader-ios
-            toolchain build python3 kivy ffmpeg || toolchain build python3 kivy
-            toolchain create YTDownloader ios_app
-            cd YTDownloader-ios
-            if ! toolchain pip --version 2>&1; then
-              echo "ERROR: Still cannot fix toolchain pip after rebuild"
-              exit 1
-            fi
-          fi
-          echo "✓ toolchain pip still functional after project creation"
-
-      # ── 9. Apply Info.plist ────────────────────────────────────────────────
+      # ── 10. Apply Info.plist ────────────────────────────────────────────────
       - name: Apply custom Info.plist
         run: |
           TARGET="YTDownloader-ios/YTDownloader/Info.plist"
@@ -203,7 +205,7 @@ jobs:
             echo "Warning: Info.plist not found."
           fi
 
-      # ── 10. Apply app icon ────────────────────────────────────────────────
+      # ── 11. Apply app icon ────────────────────────────────────────────────
       - name: Configure app icon
         run: |
           cd YTDownloader-ios
@@ -216,31 +218,17 @@ jobs:
             echo "Default empty icon structure created."
           fi
 
-      # ── 11. Install pure-Python dependencies ──────────────────────────────
-      # requirements.txt contains only pure-Python packages (yt-dlp, plyer, …).
-      # kivy and pyobjus are NOT listed there; they are compiled by the toolchain.
-      - name: Install pure-Python dependencies
+      # ── 12. Verify dependencies are available in Xcode project ────────────────
+      - name: Verify dependencies in Xcode project
         run: |
+          echo "=== Verifying dependencies in Xcode project ==="
           cd YTDownloader-ios
-          
-          echo "=== Pre-installation diagnostics ==="
-          echo "Current directory: $(pwd)"
-          echo "Toolchain location: $(which toolchain)"
-          echo "Dist directory contents:"
-          ls -la ../dist/ || echo "No dist/ directory found"
-          echo "Requirements file:"
-          cat ../ios/requirements.txt
-          
-          echo "=== Upgrading pip in toolchain environment ==="
-          toolchain pip install --upgrade pip
-          
-          echo "=== Installing requirements ==="
-          toolchain pip install -r ../ios/requirements.txt
-          
-          echo "=== Post-installation verification ==="
-          toolchain pip list
+          echo "Checking site-packages in the project..."
+          find . -name "site-packages" -type d || echo "No site-packages found yet"
+          echo "Project structure:"
+          ls -la
 
-      # ── 12. Build unsigned IPA ────────────────────────────────────────────
+      # ── 13. Build unsigned IPA ────────────────────────────────────────────
       - name: Build unsigned IPA
         working-directory: ./YTDownloader-ios
         run: |
@@ -255,7 +243,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty || true   # xcpretty for clean output; fall back to raw
 
-      # ── 13. Package IPA ───────────────────────────────────────────────────
+      # ── 14. Package IPA ───────────────────────────────────────────────────
       - name: Package IPA for sideloading
         working-directory: ./YTDownloader-ios
         run: |
@@ -281,7 +269,7 @@ jobs:
           echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
           echo "Created: $IPA_NAME ($(du -sh "$IPA_NAME" | cut -f1))"
 
-      # ── 14. Upload IPA artifact ───────────────────────────────────────────
+      # ── 15. Upload IPA artifact ───────────────────────────────────────────
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
@@ -289,7 +277,7 @@ jobs:
           path: YTDownloader-ios/${{ env.IPA_NAME }}
           retention-days: 90
 
-      # ── 15. Build summary ─────────────────────────────────────────────────
+      # ── 16. Build summary ─────────────────────────────────────────────────
       - name: Write build summary
         if: always()
         run: |
@@ -312,7 +300,7 @@ jobs:
             echo "Files app → On My iPhone → YT Downloader"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ── 16. Upload build logs on failure ──────────────────────────────────
+      # ── 17. Upload build logs on failure ──────────────────────────────────
       - name: Upload build logs (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
