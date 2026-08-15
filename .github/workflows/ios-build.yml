@@ -1,5 +1,6 @@
 name: Build iOS App (Unsigned – Sideloading)
 
+# ── Triggers ──────────────────────────────────────────────────────────────────
 on:
   workflow_dispatch:
     inputs:
@@ -16,34 +17,38 @@ on:
     branches:
       - master
 
+# Cancel in-progress runs for the same ref (saves runner minutes)
 concurrency:
   group: ios-build-${{ github.ref }}
   cancel-in-progress: true
 
+# ── Version single source of truth ────────────────────────────────────────────
+env:
+  APP_VERSION: ${{ github.event.inputs.version || '2.0.0' }}
+
 jobs:
   build-ios:
     runs-on: macos-14
-    timeout-minutes: 180
+    timeout-minutes: 120   # Reduced from 180 — gate script prevents runaway rebuilds
 
     steps:
-      # ── 1. Checkout ────────────────────────────────────────────────────────
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # ── 2. Python ─────────────────────────────────────────────────────────
+      # ── 2. Python ────────────────────────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # ── 3. Homebrew build tools ────────────────────────────────────────────
+      # ── 3. Homebrew build tools ──────────────────────────────────────────────
       - name: Install Homebrew build dependencies
         run: |
           brew install autoconf automake libtool pkg-config
           brew link libtool
-          gem install xcpretty --no-document 2>/dev/null || true
 
-      # ── 4. kivy-ios + Cython ──────────────────────────────────────────────
+      # ── 4. kivy-ios + Cython ─────────────────────────────────────────────────
       - name: Install kivy-ios and Cython
         id: install-kivy-ios
         run: |
@@ -51,194 +56,90 @@ jobs:
           python -m pip install "kivy-ios==2024.03.17" "cython>=0.29"
           echo "version=$(pip show kivy-ios | grep Version | cut -d' ' -f2)" >> $GITHUB_OUTPUT
 
-      # ── 5. Cache compiled toolchain ───────────────────────────────────────
-      #  *** MUST come before the toolchain build step so the cache is
-      #  restored before we try to compile python3/kivy. ***
-      - name: Cache kivy-ios compiled toolchain
+      # ── 5a. Cache: compiled toolchain dist/ (layer 1 — slow to build) ───────
+      #   Key hashes toolchain.py (recipe list) + kivy-ios version.
+      #   build/ is intentionally EXCLUDED — it is intermediate state that
+      #   inflates the cache and is a common corruption source.
+      - name: Cache kivy-ios compiled toolchain (dist/)
         id: cache-toolchain
         uses: actions/cache@v4
         with:
-          path: |
-            ~/.cache/kivy-ios
-            dist/
-            build/
-          key: ${{ runner.os }}-kivyios-${{ steps.install-kivy-ios.outputs.version }}-${{ hashFiles('ios/requirements.txt') }}-v6
+          path: dist/
+          key: ${{ runner.os }}-toolchain-${{ steps.install-kivy-ios.outputs.version }}-${{ hashFiles('ios/toolchain.py') }}-v1
           restore-keys: |
-            ${{ runner.os }}-kivyios-
+            ${{ runner.os }}-toolchain-${{ steps.install-kivy-ios.outputs.version }}-
+            ${{ runner.os }}-toolchain-
 
-      # ── 6. Build toolchain (skipped if cache hit) ──────────────────────────
+      # ── 5b. Cache: pip packages (layer 2 — fast, changes with requirements) ──
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('ios/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # ── 6. Build toolchain (skipped on cache hit) ─────────────────────────
       - name: Build kivy-ios toolchain (hostpython3 + python3 + kivy + ffmpeg)
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
-          echo "Cache miss – building toolchain from source (takes ~20 min)…"
-          toolchain build hostpython3 python3 kivy ffmpeg || toolchain build hostpython3 python3 kivy
+          echo "Cache miss – building toolchain from source (~20 min)…"
+          toolchain build hostpython3 python3 kivy ffmpeg \
+            || toolchain build hostpython3 python3 kivy
 
-      - name: Verify toolchain
+      # ── 7. Single-gate toolchain verification ────────────────────────────────
+      #   Replaces the original 4-step cascade. Rebuilds once if corrupt;
+      #   fails definitively after one retry. Sets TOOLCHAIN_OK=true.
+      - name: Verify toolchain (single gate)
         run: |
-          echo "Toolchain dist contents:"
-          ls dist/ || echo "(dist/ not present)"
-          which toolchain
-          toolchain recipes
+          chmod +x scripts/toolchain_verify.sh
+          bash scripts/toolchain_verify.sh
 
-      # ── 6.5. Comprehensive toolchain verification and recovery (handles all 3 error cases)
-      - name: Comprehensive toolchain verification and recovery
+      # ── 8. Use existing icons (or generate if missing) ────────────────────
+      - name: Ensure app icons are ready
         run: |
-          echo "=== Comprehensive Toolchain Verification ==="
-          
-          # Case 1: Check if toolchain commands are available
-          echo "Case 1: Verifying toolchain command availability..."
-          if ! command -v toolchain &> /dev/null; then
-            echo "ERROR: toolchain command not found"
-            exit 1
-          fi
-          echo "✓ toolchain command available"
-          
-          # Case 2: Check for cache corruption - verify dist/ directory structure
-          echo "Case 2: Checking for cache corruption..."
-          if [ -d "dist" ]; then
-            echo "Found dist/ directory, checking contents..."
-            ls -la dist/
-            if [ -z "$(ls -A dist/)" ]; then
-              echo "ERROR: dist/ directory is empty (cache corruption)"
-              echo "Cleaning corrupted cache and rebuilding..."
-              rm -rf dist/ build/ ~/.cache/kivy-ios
-              toolchain build hostpython3 python3 kivy ffmpeg || toolchain build hostpython3 python3 kivy
-            else
-              echo "✓ dist/ directory has content"
-            fi
+          if [ -d "ios/appicon/AppIcon.appiconset" ] && [ -f "ios/appicon/AppIcon.appiconset/Contents.json" ]; then
+            echo "✓ Using existing committed AppIcon.appiconset"
           else
-            echo "dist/ directory not found, toolchain not built yet"
+            echo "AppIcon.appiconset missing, generating from source..."
+            pip install Pillow
+            python ios/appicon/generate_icons.py \
+              --source "favicon (1).ico" \
+              --output ios/appicon
           fi
-          
-          # Case 3: Check for hostpython3 pip binary specifically
-          echo "Case 3: Checking for hostpython3 pip binary..."
-          if [ -d "dist/hostpython3" ]; then
-            echo "Found hostpython3 directory, checking for pip binary..."
-            ls -la dist/hostpython3/bin/ || echo "No bin directory in hostpython3"
-            
-            if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
-              echo "ERROR: hostpython3 pip binary missing (this is the reported issue)"
-              echo "Attempting to install pip manually in hostpython3..."
-              
-              # Try to manually install pip using the hostpython3
-              if [ -f "dist/hostpython3/bin/python3" ]; then
-                echo "Found hostpython3 python binary, attempting to bootstrap pip..."
-                dist/hostpython3/bin/python3 -m ensurepip --upgrade || dist/hostpython3/bin/python3 -m pip install --upgrade pip
-                
-                # Check if pip was installed
-                if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
-                  echo "Manual pip installation failed, rebuilding toolchain..."
-                  rm -rf dist/ build/ ~/.cache/kivy-ios
-                  toolchain build hostpython3 python3 kivy ffmpeg || toolchain build hostpython3 python3 kivy
-                else
-                  echo "✓ hostpython3 pip binary installed manually"
-                fi
-              else
-                echo "hostpython3 python binary not found, rebuilding toolchain..."
-                rm -rf dist/ build/ ~/.cache/kivy-ios
-                toolchain build hostpython3 python3 kivy ffmpeg || toolchain build hostpython3 python3 kivy
-              fi
-              
-              # Verify pip binary exists after recovery attempt
-              if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
-                echo "ERROR: hostpython3 pip binary still missing after recovery attempts"
-                ls -la dist/hostpython3/bin/ || true
-                exit 1
-              else
-                echo "✓ hostpython3 pip binary now present"
-              fi
-            else
-              echo "✓ hostpython3 pip binary exists"
-            fi
-          else
-            echo "hostpython3 directory not found, toolchain not built yet"
-          fi
-          
-          # Case 4: Check for environment initialization - test toolchain pip
-          echo "Case 4: Checking toolchain Python environment initialization..."
-          if ! toolchain pip --version 2>&1; then
-            echo "ERROR: toolchain pip not functional (environment initialization issue)"
-            echo "Attempting to fix by rebuilding toolchain..."
-            rm -rf dist/ build/
-            toolchain build hostpython3 python3 kivy ffmpeg || toolchain build hostpython3 python3 kivy
-            
-            # Verify rebuild worked
-            if ! toolchain pip --version 2>&1; then
-              echo "ERROR: Toolchain rebuild failed to fix pip issue"
-              echo "Detailed toolchain status:"
-              toolchain recipes || true
-              ls -la dist/ || true
-              exit 1
-            fi
-          else
-            echo "✓ toolchain pip is functional"
-          fi
-          
-          # Additional verification: Check python3 recipe is compiled
-          echo "Additional check: Verifying python3 recipe compilation..."
-          if ! toolchain recipes | grep -q "python3.*compiled"; then
-            echo "WARNING: python3 might not be properly compiled"
-            echo "Rebuilding toolchain to ensure python3 is compiled..."
-            rm -rf dist/ build/
-            toolchain build hostpython3 python3 kivy ffmpeg || toolchain build hostpython3 python3 kivy
-          else
-            echo "✓ python3 recipe appears compiled"
-          fi
-          
-          echo "=== Toolchain verification complete ==="
 
-      # ── 6.5. Pre-pip installation verification (ensures hostpython3 pip binary exists)
-      - name: Verify hostpython3 pip before installation
-        run: |
-          echo "=== Pre-pip Installation Verification ==="
-          if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
-            echo "ERROR: hostpython3 pip binary missing, rebuilding toolchain..."
-            rm -rf dist/ build/ ~/.cache/kivy-ios
-            toolchain build hostpython3 python3 kivy ffmpeg || toolchain build hostpython3 python3 kivy
-            
-            # Verify pip binary exists after rebuild
-            if [ ! -f "dist/hostpython3/bin/pip3" ] && [ ! -f "dist/hostpython3/bin/pip" ]; then
-              echo "ERROR: hostpython3 pip binary still missing after rebuild"
-              ls -la dist/hostpython3/bin/ || true
-              exit 1
-            else
-              echo "✓ hostpython3 pip binary now present"
-            fi
-          else
-            echo "✓ hostpython3 pip binary exists"
-          fi
-          echo "=== Pre-pip verification complete ==="
-
-      # ── 8. Install pure-Python dependencies BEFORE project creation (avoids environment initialization issues)
-      # requirements.txt contains only pure-Python packages (yt-dlp, plyer, …).
-      # kivy and pyobjus are NOT listed there; they are compiled by the toolchain.
+      # ── 9. Install pure-Python dependencies ──────────────────────────────────
+      #   kivy and pyobjus are compiled by the toolchain — do NOT add them here.
       - name: Install pure-Python dependencies
+        if: env.TOOLCHAIN_OK == 'true'
         run: |
-          echo "=== Pre-installation diagnostics ==="
-          echo "Current directory: $(pwd)"
-          echo "Toolchain location: $(which toolchain)"
-          echo "Dist directory contents:"
-          ls -la dist/ || echo "No dist/ directory found"
-          echo "Requirements file:"
-          cat ios/requirements.txt
-          
           echo "=== Upgrading pip in toolchain environment ==="
           toolchain pip install --upgrade pip
-          
+
           echo "=== Installing requirements ==="
           toolchain pip install -r ios/requirements.txt
-          
-          echo "=== Post-installation verification ==="
+
+          echo "=== Installed packages ==="
           toolchain pip list
 
-      # ── 9. Stage app files ─────────────────────────────────────────────────
+      # ── 10. Stage application files ───────────────────────────────────────
       - name: Stage application files
+        if: env.TOOLCHAIN_OK == 'true'
         run: |
+          rm -rf ios_app
           mkdir -p ios_app
-          cp ios/main.py        ios_app/
-          cp ios/requirements.txt ios_app/
-          cp ios/Info.plist     ios_app/
 
+          # Entry point
+          cp ios/main.py ios_app/
+
+          # App package (modular structure)
+          cp -r ios/app ios_app/app
+
+          # Metadata
+          cp ios/requirements.txt ios_app/
+          cp ios/Info.plist       ios_app/
+
+          # App icons
           if [ -d "ios/appicon/AppIcon.appiconset" ]; then
             cp -r ios/appicon/AppIcon.appiconset ios_app/
             echo "App icons staged."
@@ -246,11 +147,12 @@ jobs:
             echo "Warning: AppIcon.appiconset not found, default icon will be used."
           fi
 
-          echo "Staged files:"
-          ls -R ios_app/
+          echo "--- Staged files ---"
+          find ios_app/ -type f | sort
 
-      # ── 10. Create Xcode project ────────────────────────────────────────────
+      # ── 11. Create Xcode project ───────────────────────────────────────────
       - name: Create Xcode project via toolchain
+        if: env.TOOLCHAIN_OK == 'true'
         run: |
           toolchain create YTDownloader ios_app
 
@@ -262,19 +164,21 @@ jobs:
           echo "Xcode project created:"
           ls -la YTDownloader-ios/
 
-      # ── 11. Apply Info.plist ────────────────────────────────────────────────
+      # ── 12. Apply custom Info.plist ───────────────────────────────────────
       - name: Apply custom Info.plist
+        if: env.TOOLCHAIN_OK == 'true'
         run: |
           TARGET="YTDownloader-ios/YTDownloader/Info.plist"
           if [ -f "ios_app/Info.plist" ]; then
             cp ios_app/Info.plist "$TARGET"
             echo "Info.plist applied."
           else
-            echo "Warning: Info.plist not found."
+            echo "Warning: Info.plist not found — using toolchain default."
           fi
 
-      # ── 12. Apply app icon ────────────────────────────────────────────────
+      # ── 13. Configure app icon ─────────────────────────────────────────────
       - name: Configure app icon
+        if: env.TOOLCHAIN_OK == 'true'
         run: |
           cd YTDownloader-ios
           mkdir -p YTDownloader/Assets.xcassets
@@ -286,18 +190,9 @@ jobs:
             echo "Default empty icon structure created."
           fi
 
-      # ── 13. Verify dependencies are available in Xcode project ────────────────
-      - name: Verify dependencies in Xcode project
-        run: |
-          echo "=== Verifying dependencies in Xcode project ==="
-          cd YTDownloader-ios
-          echo "Checking site-packages in the project..."
-          find . -name "site-packages" -type d || echo "No site-packages found yet"
-          echo "Project structure:"
-          ls -la
-
-      # ── 14. Build unsigned IPA ────────────────────────────────────────────
+      # ── 14. Build unsigned IPA ─────────────────────────────────────────────
       - name: Build unsigned IPA
+        if: env.TOOLCHAIN_OK == 'true'
         working-directory: ./YTDownloader-ios
         run: |
           xcodebuild \
@@ -306,13 +201,25 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
+            APP_VERSION="${{ env.APP_VERSION }}" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            | xcpretty || true   # xcpretty for clean output; fall back to raw
+            -quiet || \
+          xcodebuild \
+            -project YTDownloader.xcodeproj \
+            -scheme  YTDownloader \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            APP_VERSION="${{ env.APP_VERSION }}" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
 
-      # ── 15. Package IPA ───────────────────────────────────────────────────
+      # ── 15. Package IPA ────────────────────────────────────────────────────
       - name: Package IPA for sideloading
+        if: env.TOOLCHAIN_OK == 'true'
         working-directory: ./YTDownloader-ios
         run: |
           APP_PATH=$(find build/Build/Products -name "*.app" | head -1)
@@ -325,9 +232,7 @@ jobs:
 
           echo "Found .app bundle: $APP_PATH"
 
-          VERSION="${{ github.event.inputs.version || '2.0.0' }}"
-          BUILD="${{ github.run_number }}"
-          IPA_NAME="YTDownloader-${VERSION}-${BUILD}-unsigned.ipa"
+          IPA_NAME="YTDownloader-${{ env.APP_VERSION }}-${{ github.run_number }}-unsigned.ipa"
 
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
@@ -337,15 +242,16 @@ jobs:
           echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
           echo "Created: $IPA_NAME ($(du -sh "$IPA_NAME" | cut -f1))"
 
-      # ── 16. Upload IPA artifact ───────────────────────────────────────────
+      # ── 16. Upload IPA artifact ────────────────────────────────────────────
       - name: Upload unsigned IPA
+        if: env.TOOLCHAIN_OK == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: YTDownloader-iOS-unsigned-${{ github.run_number }}
+          name: YTDownloader-iOS-${{ env.APP_VERSION }}-unsigned-${{ github.run_number }}
           path: YTDownloader-ios/${{ env.IPA_NAME }}
           retention-days: 90
 
-      # ── 17. Build summary ─────────────────────────────────────────────────
+      # ── 17. Build summary ──────────────────────────────────────────────────
       - name: Write build summary
         if: always()
         run: |
@@ -354,10 +260,11 @@ jobs:
             echo ""
             echo "| Field | Value |"
             echo "|---|---|"
-            echo "| Version | ${{ github.event.inputs.version || '2.0.0' }} |"
+            echo "| Version | ${{ env.APP_VERSION }} |"
             echo "| Build # | ${{ github.run_number }} |"
-            echo "| Type | Unsigned (sideloading) |"
-            echo "| Status | ${{ job.status }} |"
+            echo "| Commit  | ${{ github.sha }} |"
+            echo "| Type    | Unsigned (sideloading) |"
+            echo "| Status  | ${{ job.status }} |"
             echo ""
             echo "### Install with"
             echo "- **AltStore** (recommended)"
@@ -368,7 +275,7 @@ jobs:
             echo "Files app → On My iPhone → YT Downloader"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ── 18. Upload build logs on failure ──────────────────────────────────
+      # ── 18. Upload build logs on failure ───────────────────────────────────
       - name: Upload build logs (on failure)
         if: failure()
         uses: actions/upload-artifact@v4

@@ -1,50 +1,58 @@
-# iOS build artifacts
+# ── iOS build artifacts ────────────────────────────────────────────────────────
 build/
 dist/
 *.ipa
 *.app
 *.dSYM
 *.dSYM.zip
+YTDownloader-ios/
+ios_app/
 
-# Python
+# ── kivy-ios toolchain intermediates ──────────────────────────────────────────
+ios/build/
+ios/dist/
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyd
 .Python
 *.egg-info/
-dist/
-build/
 .eggs/
 
-# IDE
+# Virtual environments (ios_build.sh creates venv/ — should never be committed)
+venv/
+.venv/
+env/
+
+# ── IDE ────────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# macOS
+# ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store
 .AppleDouble
 .LSOverride
+Icon?
+._*
 
-# Xcode
+# ── Xcode ─────────────────────────────────────────────────────────────────────
 *.xcodeproj/
 *.xcworkspace/
 xcuserdata/
 DerivedData/
 
-# Kivy-ios
-ios/YTDownloader-ios/
-ios/build/
-ios/dist/
-
-# Logs
+# ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 logs/
 
-# Temporary files
+# ── Temporary / cache ─────────────────────────────────────────────────────────
 *.tmp
 *.temp
 .cache/
+/tmp/
