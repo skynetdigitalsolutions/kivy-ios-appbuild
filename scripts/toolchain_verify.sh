@@ -71,6 +71,12 @@ else
     toolchain recipes || true
     echo "--- dist/ contents ---"
     ls -la dist/ || true
+    echo "--- build/ contents ---"
+    ls -la build/ || true
+    echo "--- toolchain version ---"
+    python -c "import kivy_ios; print(kivy_ios.__version__)" || true
+    echo "--- Python version ---"
+    python --version || true
     exit 1
   fi
 fi

@@ -81,12 +81,41 @@ jobs:
             ${{ runner.os }}-pip-
 
       # ── 6. Build toolchain (skipped on cache hit) ─────────────────────────
-      - name: Build kivy-ios toolchain (hostpython3 + python3 + kivy + ffmpeg)
+      - name: Build kivy-ios toolchain (hostpython3 python3 kivy ffmpeg)
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
           echo "Cache miss – building toolchain from source (~20 min)…"
-          toolchain build hostpython3 python3 kivy ffmpeg \
-            || toolchain build hostpython3 python3 kivy
+          echo "=== Attempting full build with ffmpeg ==="
+          toolchain build hostpython3 python3 kivy ffmpeg 2>&1 | tee toolchain_ffmpeg_build.log
+          FFMPEG_EXIT_CODE=${PIPESTATUS[0]}
+          
+          if [ $FFMPEG_EXIT_CODE -ne 0 ]; then
+            echo "=== FFmpeg build failed (exit code: $FFMPEG_EXIT_CODE), retrying without ffmpeg ==="
+            echo "=== FFmpeg build log ==="
+            cat toolchain_ffmpeg_build.log
+            toolchain build hostpython3 python3 kivy 2>&1 | tee toolchain_no_ffmpeg_build.log
+            NO_FFMPEG_EXIT_CODE=${PIPESTATUS[0]}
+            
+            if [ $NO_FFMPEG_EXIT_CODE -ne 0 ]; then
+              echo "=== Build without ffmpeg also failed (exit code: $NO_FFMPEG_EXIT_CODE) ==="
+              echo "=== Build without ffmpeg log ==="
+              cat toolchain_no_ffmpeg_build.log
+              exit $NO_FFMPEG_EXIT_CODE
+            fi
+          fi
+      - name: Upload toolchain build logs on failure
+        if: failure() && steps.cache-toolchain.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-build-logs-${{ github.run_number }}
+          path: |
+            build/
+            dist/
+            ~/.cache/kivy-ios/
+            toolchain_ffmpeg_build.log
+            toolchain_no_ffmpeg_build.log
+          if-no-files-found: warn
+          retention-days: 7
 
       # ── 7. Single-gate toolchain verification ────────────────────────────────
       #   Replaces the original 4-step cascade. Rebuilds once if corrupt;
