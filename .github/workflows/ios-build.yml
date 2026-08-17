@@ -196,6 +196,18 @@ jobs:
         if: env.TOOLCHAIN_OK == 'true'
         working-directory: ./YTDownloader-ios
         run: |
+          echo "=== Starting xcodebuild ==="
+          echo "Working directory: $(pwd)"
+          echo "Xcode project contents:"
+          ls -la
+          
+          echo "=== Checking for Xcode project ==="
+          if [ ! -d "YTDownloader.xcodeproj" ]; then
+            echo "Error: YTDownloader.xcodeproj not found"
+            exit 1
+          fi
+          
+          echo "=== Running xcodebuild (first attempt) ==="
           xcodebuild \
             -project YTDownloader.xcodeproj \
             -scheme  YTDownloader \
@@ -206,39 +218,74 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            -quiet || \
-          xcodebuild \
-            -project YTDownloader.xcodeproj \
-            -scheme  YTDownloader \
-            -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath build \
-            APP_VERSION="${{ env.APP_VERSION }}" \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            -quiet
+          
+          BUILD_EXIT_CODE=$?
+          
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "=== First xcodebuild attempt failed (exit code: $BUILD_EXIT_CODE) ==="
+            echo "=== Retrying without -quiet flag for more details ==="
+            xcodebuild \
+              -project YTDownloader.xcodeproj \
+              -scheme  YTDownloader \
+              -configuration Release \
+              -sdk iphoneos \
+              -derivedDataPath build \
+              APP_VERSION="${{ env.APP_VERSION }}" \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_ALLOWED=NO
+          
+            BUILD_EXIT_CODE=$?
+            if [ $BUILD_EXIT_CODE -ne 0 ]; then
+              echo "=== Second xcodebuild attempt also failed (exit code: $BUILD_EXIT_CODE) ==="
+              echo "=== Build directory contents ==="
+              ls -la build/ || echo "Build directory does not exist"
+              exit $BUILD_EXIT_CODE
+            fi
+          fi
+          
+          echo "=== Build completed successfully ==="
+          echo "=== Build directory contents ==="
+          ls -la build/
 
       # ── 15. Package IPA ────────────────────────────────────────────────────
       - name: Package IPA for sideloading
         if: env.TOOLCHAIN_OK == 'true'
         working-directory: ./YTDownloader-ios
         run: |
-          APP_PATH=$(find build/Build/Products -name "*.app" | head -1)
+          echo "=== Looking for .app bundle ==="
+          echo "Build directory structure:"
+          find build/ -type f -name "*.app" 2>/dev/null || echo "No .app files found in build/"
+          
+          APP_PATH=$(find build/Build/Products -name "*.app" 2>/dev/null | head -1)
 
           if [ -z "$APP_PATH" ]; then
-            echo "Error: .app bundle not found."
-            find build/ -name "*.app" || true
+            echo "Error: .app bundle not found in build/Build/Products."
+            echo "=== Full build directory contents ==="
+            find build/ -type f 2>/dev/null || echo "Build directory is empty or doesn't exist"
             exit 1
           fi
 
           echo "Found .app bundle: $APP_PATH"
+          
+          if [ ! -d "$APP_PATH" ]; then
+            echo "Error: APP_PATH is not a directory: $APP_PATH"
+            exit 1
+          fi
 
           IPA_NAME="YTDownloader-${{ env.APP_VERSION }}-${{ github.run_number }}-unsigned.ipa"
 
+          echo "=== Creating IPA ==="
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -r "$IPA_NAME" Payload/
           rm -rf Payload/
+
+          if [ ! -f "$IPA_NAME" ]; then
+            echo "Error: IPA file was not created: $IPA_NAME"
+            exit 1
+          fi
 
           echo "IPA_NAME=$IPA_NAME" >> "$GITHUB_ENV"
           echo "Created: $IPA_NAME ($(du -sh "$IPA_NAME" | cut -f1))"
@@ -251,6 +298,7 @@ jobs:
           name: YTDownloader-iOS-${{ env.APP_VERSION }}-unsigned-${{ github.run_number }}
           path: YTDownloader-ios/${{ env.IPA_NAME }}
           retention-days: 90
+        continue-on-error: false
 
       # ── 17. Build summary ──────────────────────────────────────────────────
       - name: Write build summary
@@ -285,5 +333,5 @@ jobs:
           path: |
             YTDownloader-ios/build/
             ~/Library/Logs/xcodebuild*
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 7
